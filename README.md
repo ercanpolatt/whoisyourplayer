@@ -5,39 +5,39 @@
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10.x-red.svg?logo=google&logoColor=white)](https://developers.google.com/mediapipe)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An interactive, high-performance **Computer Vision and AI Pose Matching** application that recognizes and matches live human body gestures in real-time against a database of iconic football player celebrations (e.g., Arda Güler's sky-point, Kerem Aktürkoğlu's magic wand, Merih Demiral's wolf gesture). 
+Kameradan alınan canlı görüntü üzerinde kullanıcının vücut duruşunu ve el hareketlerini analiz ederek, ünlü futbolcuların ikonik gol sevinçleri (örneğin Arda Güler'in gökyüzü işareti, Kerem Aktürkoğlu'nun sihirli değnek hareketi, Merih Demiral'ın bozkurt sevinci) ile eşleştiren, yüksek performanslı bir **Yapay Zeka ve Bilgisayarlı Görü (Computer Vision)** uygulamasıdır. 
 
-Built using **MediaPipe Tasks**, **TensorFlow Lite**, and **OpenCV**, this project demonstrates advanced concepts in **vector geometry**, **spatial normalization**, and **custom real-time GUI/HUD engineering** in Python.
+**MediaPipe Tasks**, **TensorFlow Lite** ve **OpenCV** kullanılarak geliştirilen bu proje; **vektör geometrisi**, **mekansal normalizasyon** ve Python ile **gerçek zamanlı GUI/HUD tasarımı** gibi ileri düzey mühendislik konseptlerini içermektedir.
 
 ---
 
-## 🌟 Key Technical Features & Showcase
+## 🌟 Öne Çıkan Teknik Özellikler
 
-For hiring managers and technical reviewers, this application implements several core computer vision and software engineering principles:
+Bu uygulama, bilgisayarlı görü ve yazılım mühendisliği alanındaki yetkinlikleri göstermek üzere şu yapıları barındırır:
 
-### 1. High-Precision Joint-Angle Analysis (Vector Math)
-Instead of matching raw 2D pixel coordinates (which fail when camera angles or player distances change), this system extracts structural postures using **vector algebra**. It calculates the exact flexion and extension angles of human joints (e.g., elbows and shoulders) using vector dot products:
+### 1. Yüksek Hassasiyetli Eklem Açısı Analizi (Vektör Matematiği)
+Kamera açısı veya oyuncunun kameraya uzaklığı değiştiğinde başarısız olan ham piksel koordinat eşleştirmesi yerine, bu sistem **vektör cebiri** kullanarak yapısal duruşları yakalar. İnsan eklemlerinin (örneğin dirsek ve omuz) bükülme ve açılma açılarını vektörel iç çarpım yöntemiyle tam olarak hesaplar:
 
 $$\theta = \arccos \left( \frac{\vec{BA} \cdot \vec{BC}}{\|\vec{BA}\| \|\vec{BC}\|} \right)$$
 
-*   **Elbow Angles:** Flexion/extension degrees between the shoulder, elbow, and wrist joints.
-*   **Shoulder Angles:** Arm abduction/adduction relative to the torso.
-*   **Arm Elevation:** The angle of the upper arm relative to the horizontal plane.
+*   **Dirsek Açıları:** Omuz, dirsek ve bilek eklemleri arasındaki bükülme derecesi.
+*   **Omuz Açıları:** Üst kolların gövdeye göre açılma/kapanma derecesi.
+*   **Kol Yükselme Açısı:** Üst kolun yatay düzleme göre duruş yönü.
 
-### 2. Scale & Translation Invariance
-To ensure perfect matching regardless of where the user stands or how big they are in the camera frame, the system normalizes all coordinates:
-*   **Neck Center Offset:** Translates all landmark coordinates to a local coordinate system centered on the midpoint of the shoulders.
-*   **Shoulder Width Scaling:** Scales all offsets by dividing them by the user's current shoulder width. This acts as a dynamic bounding box scale factor.
+### 2. Ölçek ve Konum Bağımsızlığı (Scale & Translation Invariance)
+Kullanıcının kameraya olan mesafesinden veya ekranın neresinde durduğundan bağımsız olarak kararlı bir eşleştirme sunmak için tüm iskelet koordinatları normalize edilir:
+*   **Omuz Merkezi Merkezleme:** Tüm eklem noktaları, omuzların orta noktası orijin (0,0) kabul edilerek buraya taşınır.
+*   **Omuz Genişliği Ölçeklemesi:** Tüm uzaklıklar kullanıcının anlık omuz genişliğine bölünür. Bu sayede duruş boyutu dinamik olarak ölçeklenir.
 
-### 3. Customized Real-Time HUD Overlay (30+ FPS)
-*   **Transparent Diagnostic Overlay:** Renders a neon-styled **"Detaylı Analiz Telemetrisi"** (Pose Telemetry) card directly onto the live feed, displaying joint angles, wrist-to-wrist distances, and height flags in real-time.
-*   **Live Skeletal Rigging:** Draws a custom neon-turquoise bones-and-joints layout, printing active joint degrees (e.g. `135 deg`) next to the joints dynamically.
-*   **Unified Canvas Architecture:** Combines webcam feeds, diagnostic text, scanning animations, and matched player visual cards into a single `1100x650` pixel BGR frame buffer.
+### 3. Özelleştirilmiş Gerçek Zamanlı HUD Arayüzü (30+ FPS)
+*   **Şeffaf Diagnostic Telemetri Paneli:** Kamera ekranının sol üst köşesine yerleştirilmiş neon tasarımlı telemetri kartı; anlık dirsek açılarını, iki bilek arasındaki mesafeyi ve ellerin havada olup olmadığını yansıtır.
+*   **Canlı İskelet Rig Çizimi:** Eklemleri altın sarısı noktalar, kemikleri neon turkuaz çizgilerle birleştirip dirsek eklemlerinin anlık açı değerlerini (örneğin `135 deg`) canlı olarak ekrana yazar.
+*   **Tek Pencere (Unified Canvas) Mimarisi:** Kamera görüntüsü, iskelet çizgileri, analiz grafikleri ve eşleşen futbolcu kartı tek bir `1100x650` piksellik BGR matrisinde birleştirilerek tek pencerede akıcı şekilde sunulur.
 
-### 4. Robust Edge Cases & State Control
-*   **Buffer Lock-On (Cooldown):** Implements a `2.5-second` cooldown state-machine. Once a pose matches with high similarity, the match is locked to prevent rapid, annoying flickering between players.
-*   **Fallback Standby State:** Shows a pulsing radar-target scanning animation when no user pose is detected.
-*   **Windows Unicode File Path Handling:** Standard file readers in OpenCV often crash on Windows with paths containing non-ASCII symbols (e.g., Turkish characters like `Masaüstü`). This app bypasses it by reading image files as raw binary buffers and decoding them in memory via NumPy:
+### 4. Kararlılık ve Hata Kontrolleri
+*   **Buffer Eşleşme Kilidi (Cooldown):** `2.5 saniyelik` bir durum makinesi (state-machine) barındırır. Kullanıcı bir pozu doğru yaptığında sistem anında kilitlenir ve arka arkaya farklı futbolcular arasında titremeyi (flickering) önler.
+*   **Bekleme Ekranı Animasyonu:** Kullanıcı kamera karşısında değilken veya hareket etmiyorken sağ panelde dairesel bir radar tarama animasyonu döner.
+*   **Türkçe Karakterli Windows Dosya Yolu Desteği:** Standart OpenCV resim okuyucusu Windows işletim sisteminde Türkçe karakter içeren yollarda (`Masaüstü` vb.) çökebilir. Bu sorun, resimleri önce binary buffer olarak okuyup ardından NumPy ile decode ederek çözülmüştür:
     ```python
     with open(path, 'rb') as f:
         file_bytes = np.frombuffer(f.read(), dtype=np.uint8)
@@ -46,71 +46,71 @@ To ensure perfect matching regardless of where the user stands or how big they a
 
 ---
 
-## 🛠️ System Architecture
+## 🛠️ Sistem Mimarisi
 
 ```mermaid
 graph TD
-    A[Webcam Frame / Player Image] --> B[MediaPipe PoseLandmarker]
-    B --> C[33 Joint Landmarks]
-    C --> D[Filter to 11 Core Points]
-    D --> E[Neck Center Translation]
-    E --> F[Shoulder Width Scaling]
-    F --> G[Extract 13 Structural Features]
-    G --> H[Weighted Euclidean Feature Comparison]
-    H --> I[Similarity Score & Match Selection]
-    I --> J[Unified Neon HUD Canvas Render]
+    A[Kamera Karesi / Futbolcu Resmi] --> B[MediaPipe PoseLandmarker]
+    B --> C[33 İskelet Eklemi]
+    C --> D[Kritik 11 Eklem Noktası Filtresi]
+    D --> E[Omuz Merkezine Göre Hizalama]
+    E --> F[Omuz Genişliğine Göre Ölçekleme]
+    F --> G[13 Açısal ve Konumsal Özelliğin Çıkarılması]
+    G --> H[Ağırlıklı Öklid Benzerlik Hesabı]
+    H --> I[En Uygun Futbolcu ve Skor Seçimi]
+    I --> J[Tek Pencere Neon HUD Arayüz Çizimi]
 ```
 
 ---
 
-## 🏃 Setup & Installation
+## 🏃 Kurulum ve Çalıştırma
 
-### 1. Prerequisites
-Ensure you have Python 3.10+ installed.
+### 1. Gereksinimler
+Bilgisayarınızda Python 3.10+ kurulu olduğundan emin olun.
 
-### 2. Clone the Repository
+### 2. Projeyi Klonlayın
 ```bash
 git clone https://github.com/ercanpolatt/whoisyourplayer.git
 cd whoisyourplayer
 ```
 
-### 3. Install Dependencies
+### 3. Bağımlılıkları Yükleyin
 ```bash
 python -m pip install -r requirements.txt
 ```
-*(Alternatively, install packages directly: `pip install opencv-python numpy mediapipe`)*
+*(Alternatif olarak paketleri doğrudan yükleyebilirsiniz: `pip install opencv-python numpy mediapipe`)*
 
-### 4. Run the Application
+### 4. Uygulamayı Başlatın
 ```bash
 python futbolcunkim.py
 ```
-*Note: On your first run, the script will **automatically download** Google's lightweight `pose_landmarker.task` model file (9.4 MB) from Google's CDN.*
+*Not: İlk çalıştırmada script, Google sunucularından hafif yapay zeka modeli olan `pose_landmarker.task` (9.4 MB) dosyasını **otomatik olarak indirip** dizine kaydedecektir.*
 
 ---
 
-## 🎮 How to Interact
+## 🎮 Nasıl Etkileşim Kurulur?
 
-Strike the iconic celebrations in front of your webcam to test the matcher:
-1.  **Arda Güler:** Place one hand flat on your chest (heart) and raise the other hand high, pointing your index finger to the sky.
-2.  **Merih Demiral:** Raise both hands above your head/ears with bent elbows, making the wolf gesture.
-3.  **Kerem Aktürkoğlu:** Hold both wrists close to each other in front of your chest as if casting a spell with a wand.
-4.  **Kenan Yıldız:** Pull your arms in close and make his signature gesture.
+Kameranın karşısına geçin ve gol sevinçlerini taklit edin:
+1.  **Arda Güler:** Bir elinizi göğsünüze (kalbinize) koyun, diğer kolunuzu ise işaret parmağınızla gökyüzünü gösterecek şekilde yukarı kaldırın.
+2.  **Merih Demiral:** İki kolunuzu da dirseklerden bükerek başınızın yanına kaldırın ve ellerinizle bozkurt işareti yapın.
+3.  **Kerem Aktürkoğlu:** İki elinizi göğsünüzün önünde birbirine yaklaştırarak sihirli değnekle büyü yapıyormuş gibi tutun.
+4.  **Kenan Yıldız:** Kollarınızı kendinize çekip ikonik dil çıkarma duruşunu taklit edin.
 
-Press **`Q`** inside the OpenCV window to exit the application cleanly.
+Çıkış yapmak için aktif OpenCV penceresi seçiliyken **`Q`** tuşuna basmanız yeterlidir.
 
 ---
 
-## 📂 Project Structure
+## 📂 Proje Yapısı
 
 ```text
-├── futbolcular/           # PNG database of football players (transparent/stadium photos)
-├── futbolcunkim.py        # Main Python application source code
-├── pose_landmarker.task   # TensorFlow Lite Pose Landmark Model (auto-downloaded)
-├── README.md              # Documentation
-└── requirements.txt       # Dependencies
+├── futbolcular/           # Futbolcuların gol sevinci fotoğrafları veritabanı (PNG)
+├── futbolcunkim.py        # Ana Python uygulaması kaynak kodu
+├── pose_landmarker.task   # TensorFlow Lite Pose Landmark Modeli (Otomatik indirilir)
+├── README.md              # Türkçe dokümantasyon
+└── requirements.txt       # Proje bağımlılıkları listesi
 ```
 
 ---
 
-## 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 📄 Lisans
+Bu proje MIT Lisansı ile lisanslanmıştır - detaylar için [LICENSE](LICENSE) dosyasına göz atabilirsiniz.
