@@ -37,21 +37,25 @@ PLAYER_NAMES = {
 }
 
 # Poz karşılaştırmasında kullanılacak kritik vücut noktaları
-POSE_INDICES = [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+POSE_INDICES = [0, 11, 12, 13, 14, 15, 16]
 
-# El şekli ve vücut duruşuna odaklanmak için omuz/dirsek/el bileği ağırlıkları
-LANDMARK_WEIGHTS = {
-    0: 1.0,   # Burun (kafa pozisyonu)
-    11: 1.0,  # Sol Omuz
-    12: 1.0,  # Sağ Omuz
-    13: 1.5,  # Sol Dirsek
-    14: 1.5,  # Sağ Dirsek
-    15: 3.5,  # Sol El Bileği (el pozisyonu için çok kritik)
-    16: 3.5,  # Sağ El Bileği (el pozisyonu için çok kritik)
-    17: 2.0,  # Sol El Serçe Parmağı
-    18: 2.0,  # Sağ El Serçe Parmağı
-    19: 2.5,  # Sol El İşaret Parmağı
-    20: 2.5,  # Sağ El İşaret Parmağı
+# Yüksek hassasiyetli poz özellikleri yapılandırması
+# Format: feature_name: (weight, max_expected_diff)
+# El pozisyonları ve kafa hizası gol sevinçleri için en ayırt edici kısımlar olduğundan ağırlıkları yüksektir.
+FEATURE_CONFIG = {
+    "left_elbow_angle": (1.5, 90.0),
+    "right_elbow_angle": (1.5, 90.0),
+    "left_shoulder_angle": (1.5, 90.0),
+    "right_shoulder_angle": (1.5, 90.0),
+    "lw_to_center_x": (2.0, 1.5),
+    "lw_to_center_y": (2.0, 1.5),
+    "rw_to_center_x": (2.0, 1.5),
+    "rw_to_center_y": (2.0, 1.5),
+    "lw_to_nose_y": (2.5, 2.0),
+    "rw_to_nose_y": (2.5, 2.0),
+    "wrist_dist": (2.0, 2.0),
+    "lua_elev": (1.0, 90.0),
+    "rua_elev": (1.0, 90.0),
 }
 
 # ── 2. Yardımcı Fonksiyonlar ───────────────────────────────────────────
@@ -106,59 +110,102 @@ def draw_hud_card(canvas, pt1, pt2, title, border_color=(100, 100, 100), active=
         cv2.rectangle(canvas, (x1, y1 - 18), (x1 + tw + 20, y1), color, -1)
         draw_text(canvas, title, x1 + 10, y1 - 5, 0.4, (255, 255, 255), 1)
 
-def extract_normalized_landmarks(landmarks):
-    """Vücut noktalarını omuz merkezine göre konumlandırır ve omuz genişliğine bölerek ölçekler (scale-invariant)."""
-    # Sol Omuz (11), Sağ Omuz (12)
-    ls = landmarks[11]
-    rs = landmarks[12]
+def calculate_angle(a, b, c):
+    """Verilen 3 nokta arasındaki açıyı derece cinsinden hesaplar (b noktası açının köşesidir)."""
+    ba = np.array([a[0] - b[0], a[1] - b[1]])
+    bc = np.array([c[0] - b[0], c[1] - b[1]])
     
-    mid_x = (ls.x + rs.x) / 2.0
-    mid_y = (ls.y + rs.y) / 2.0
-    
-    # Omuz genişliği mesafesi
-    scale = np.sqrt((ls.x - rs.x)**2 + (ls.y - rs.y)**2)
-    if scale < 0.05:
-        scale = 0.05
-        
-    normalized = {}
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
+    angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
+    return np.degrees(angle)
+
+def extract_pose_features(landmarks):
+    """Skelet noktalarını kullanarak açısal ve konumsal 13 adet detaylı özellik çıkarır."""
+    pts = {}
+    # Gerekli noktaların varlığını ve görünürlüğünü kontrol et
     for idx in POSE_INDICES:
         lm = landmarks[idx]
-        nx = (lm.x - mid_x) / scale
-        ny = (lm.y - mid_y) / scale
-        normalized[idx] = (nx, ny, lm.visibility)
+        if lm.visibility < 0.35: # Düşük görünürlük varsa analizi atla
+            return None
+        pts[idx] = (lm.x, lm.y)
         
-    return normalized
-
-def compare_poses(user_pose, player_pose):
-    """Kullanıcının canlı pozu ile futbolcu pozu arasındaki ağırlıklı uzaklığı bulup benzerlik yüzdesi çıkarır."""
-    total_dist = 0.0
-    total_weight = 0.0
+    # Normalizasyon için omuz genişliği
+    shoulder_width = np.sqrt((pts[11][0] - pts[12][0])**2 + (pts[11][1] - pts[12][1])**2)
+    if shoulder_width < 0.05:
+        shoulder_width = 0.05
+        
+    # 1. Sol ve Sağ Dirsek Açıları
+    left_elbow_angle = calculate_angle(pts[11], pts[13], pts[15])
+    right_elbow_angle = calculate_angle(pts[12], pts[14], pts[16])
     
-    for idx in POSE_INDICES:
-        if idx not in user_pose or idx not in player_pose:
-            continue
-            
-        w = LANDMARK_WEIGHTS.get(idx, 1.0)
-        ux, uy, _ = user_pose[idx]
-        px, py, _ = player_pose[idx]
-        
-        dist = np.sqrt((ux - px)**2 + (uy - py)**2)
-        total_dist += dist * w
-        total_weight += w
-        
-    if total_weight == 0:
+    # 2. Sol ve Sağ Omuz Açıları (Gövdeye göre kol açıklığı)
+    left_shoulder_angle = calculate_angle(pts[12], pts[11], pts[13])
+    right_shoulder_angle = calculate_angle(pts[11], pts[12], pts[14])
+    
+    # Omuz merkezi
+    mid_shoulder = ((pts[11][0] + pts[12][0]) / 2.0, (pts[11][1] + pts[12][1]) / 2.0)
+    
+    # 3. Bileklerin omuz merkezine göre X, Y mesafeleri
+    lw_to_center_x = (pts[15][0] - mid_shoulder[0]) / shoulder_width
+    lw_to_center_y = (pts[15][1] - mid_shoulder[1]) / shoulder_width
+    
+    rw_to_center_x = (pts[16][0] - mid_shoulder[0]) / shoulder_width
+    rw_to_center_y = (pts[16][1] - mid_shoulder[1]) / shoulder_width
+    
+    # 4. Bileklerin buruna göre Y mesafeleri (El kafa üstünde mi / havada mı kontrolü)
+    lw_to_nose_y = (pts[15][1] - pts[0][1]) / shoulder_width
+    rw_to_nose_y = (pts[16][1] - pts[0][1]) / shoulder_width
+    
+    # 5. İki el bileği arasındaki mesafe (eller kavuştu mu kontrolü)
+    wrist_dist = np.sqrt((pts[15][0] - pts[16][0])**2 + (pts[15][1] - pts[16][1])**2) / shoulder_width
+    
+    # 6. Üst kolların yatay eksene göre duruş yönü (açısı)
+    lua_vec = np.array([pts[13][0] - pts[11][0], pts[13][1] - pts[11][1]])
+    lua_elev = np.degrees(np.arctan2(-lua_vec[1], lua_vec[0]))
+    
+    rua_vec = np.array([pts[14][0] - pts[12][0], pts[14][1] - pts[12][1]])
+    rua_elev = np.degrees(np.arctan2(-rua_vec[1], rua_vec[0]))
+    
+    return {
+        "left_elbow_angle": left_elbow_angle,
+        "right_elbow_angle": right_elbow_angle,
+        "left_shoulder_angle": left_shoulder_angle,
+        "right_shoulder_angle": right_shoulder_angle,
+        "lw_to_center_x": lw_to_center_x,
+        "lw_to_center_y": lw_to_center_y,
+        "rw_to_center_x": rw_to_center_x,
+        "rw_to_center_y": rw_to_center_y,
+        "lw_to_nose_y": lw_to_nose_y,
+        "rw_to_nose_y": rw_to_nose_y,
+        "wrist_dist": wrist_dist,
+        "lua_elev": lua_elev,
+        "rua_elev": rua_elev
+    }
+
+def compare_poses(user_features, player_features):
+    """Kullanıcının canlı poz özellikleri ile futbolcu poz özelliklerini ağırlıklı olarak karşılaştırır."""
+    if user_features is None or player_features is None:
         return 0
         
-    weighted_avg_dist = total_dist / total_weight
+    total_weighted_diff = 0.0
+    total_weight = 0.0
     
-    # Mesafe 0.0 ise %100 benzerlik, 0.8 ve üzeri ise %0 benzerlik
-    similarity = max(0, min(100, int((1.0 - (weighted_avg_dist / 0.8)) * 100)))
+    for name, (weight, max_diff) in FEATURE_CONFIG.items():
+        diff = abs(user_features[name] - player_features[name])
+        # Farkları maksimum beklenti limitine göre normalize et
+        norm_diff = min(1.0, diff / max_diff)
+        
+        total_weighted_diff += norm_diff * weight
+        total_weight += weight
+        
+    # Ağırlıklı hata ortalamasına göre benzerlik yüzdesi çıkar
+    similarity = int((1.0 - (total_weighted_diff / total_weight)) * 100)
     return similarity
 
 # ── 3. Fotoğraf Setini ve Poz Özelliklerini Yükle ───────────────────────
 print("Fotoğraf seti yükleniyor ve poz özellikleri çıkartılıyor...")
 images = {}
-player_poses = {}
+player_features_db = {}
 
 # MediaPipe Pose Landmarker Oluştur
 base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
@@ -190,14 +237,19 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
                 result = landmarker.detect(mp_image)
                 
                 if result.pose_landmarks:
-                    player_poses[name] = extract_normalized_landmarks(result.pose_landmarks[0])
-                    print(f"  -> {name} pozu basariyla indekslendi.")
+                    # Detaylı poz özelliklerini çıkar ve kaydet
+                    feats = extract_pose_features(result.pose_landmarks[0])
+                    if feats is not None:
+                        player_features_db[name] = feats
+                        print(f"  -> {name} poz detayları başarıyla indekslendi.")
+                    else:
+                        print(f"  ⚠️ Uyarı: {name} görselinde bazı kritik iskelet noktaları zayıf veya algılanamadı!")
                 else:
-                    print(f"  [!] Uyari: {name} gorselinde insan pozu tespit edilemedi!")
+                    print(f"  ⚠️ Uyarı: {name} görselinde insan pozu tespit edilemedi!")
         except Exception as e:
             print(f"Hata: {name} dosyası yüklenirken sorun oluştu: {e}")
 
-print(f"\nSistem Hazır! Başarıyla {len(images)} futbolcu yüklenip {len(player_poses)} poz indekslendi.")
+print(f"\nSistem Hazır! Başarıyla {len(images)} futbolcu yüklenip {len(player_features_db)} poz detayı indekslendi.")
 
 # ── 4. Kamera ve HUD Döngüsü Başlatılıyor ───────────────────────────────
 cap = cv2.VideoCapture(0)
@@ -208,7 +260,7 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 gosterilen_player   = None
 gosterilen_skor     = 0
 son_eslesme_zamani  = 0.0
-cooldown_zamani     = 2.0  # Eşleşmenin ekranda kalma süresi (sn)
+cooldown_zamani     = 2.5  # Eşleşmenin ekranda kalma süresi (sn)
 
 # İskelet bağlantı hatları listesi
 CONNECTIONS = [
@@ -228,8 +280,6 @@ print("\nKamera Açıldı!")
 print("-> Kamera onunde bir futbolcunun ikonik gol sevincini taklit edin.")
 print("-> Cikmak icin 'Q' tusuna basin.\n")
 
-# MediaPipe Landmarker'ı CANLI modda veya IMAGE modunda kullanabiliriz.
-# Tekil kareleri göndereceğimiz için IMAGE modu ile döngüde devam ediyoruz.
 with vision.PoseLandmarker.create_from_options(options) as landmarker:
     while True:
         ret, frame = cap.read()
@@ -254,39 +304,41 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
         
         result = landmarker.detect(mp_image)
         
-        user_pose = None
+        user_features = None
         user_landmarks = None
         pose_detected = False
 
         if result.pose_landmarks:
             user_landmarks = result.pose_landmarks[0]
-            user_pose = extract_normalized_landmarks(user_landmarks)
-            pose_detected = True
-
-            # En iyi eşleşen futbolcuyu bul
-            en_iyi_skor = -1
-            en_iyi_isim = None
+            # Detaylı poz özelliklerini çıkar
+            user_features = extract_pose_features(user_landmarks)
             
-            for name, player_pose in player_poses.items():
-                skor = compare_poses(user_pose, player_pose)
-                if skor > en_iyi_skor:
-                    en_iyi_skor = skor
-                    en_iyi_isim = name
-            
-            # Eşleşme yüzdesi %30'un üzerindeyse yeni eşleşmeyi kilitle
-            if en_iyi_isim and en_iyi_skor >= 30:
-                gosterilen_player  = en_iyi_isim
-                gosterilen_skor    = en_iyi_skor
-                son_eslesme_zamani = time.time()
+            if user_features is not None:
+                pose_detected = True
 
-        # 3. Sol Panel (Webcam Görünümü) Üzerine İskelet Çizimi
-        if pose_detected and user_landmarks:
+                # En iyi eşleşen futbolcuyu bul
+                en_iyi_skor = -1
+                en_iyi_isim = None
+                
+                for name, player_features in player_features_db.items():
+                    skor = compare_poses(user_features, player_features)
+                    if skor > en_iyi_skor:
+                        en_iyi_skor = skor
+                        en_iyi_isim = name
+                
+                # Eşleşme yüzdesi %50'nin üzerindeyse yeni eşleşmeyi kilitle (Hassas limit)
+                if en_iyi_isim and en_iyi_skor >= 50:
+                    gosterilen_player  = en_iyi_isim
+                    gosterilen_skor    = en_iyi_skor
+                    son_eslesme_zamani = time.time()
+
+        # 3. Sol Panel (Webcam Görünümü) Üzerine İskelet ve Derecelerin Çizimi
+        if pose_detected and user_landmarks and user_features:
             # İskelet bağlantı kemiklerini çiz (Neon turkuaz rengi)
             for start_idx, end_idx in CONNECTIONS:
                 sl = user_landmarks[start_idx]
                 el = user_landmarks[end_idx]
                 
-                # Sadece görünürlüğü yüksek noktaları birleştir
                 if sl.visibility > 0.4 and el.visibility > 0.4:
                     pt1 = (int(sl.x * 600), int(sl.y * 450))
                     pt2 = (int(el.x * 600), int(el.y * 450))
@@ -300,18 +352,41 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
                     cv2.circle(webcam_resized, pt, 5, (0, 215, 255), -1, cv2.LINE_AA)
                     cv2.circle(webcam_resized, pt, 2, (255, 255, 255), -1, cv2.LINE_AA)
             
-            # Algılanan pozun etrafına dinamik sınırlayıcı kutu çiz
+            # Dirsek Açı Değerlerini Ekrana Yaz (Webcam üzerinde dirseklerin hemen yanına)
+            le_angle = int(user_features["left_elbow_angle"])
+            re_angle = int(user_features["right_elbow_angle"])
+            
+            le_pt = (int(user_landmarks[13].x * 600) + 12, int(user_landmarks[13].y * 450) - 5)
+            re_pt = (int(user_landmarks[14].x * 600) - 55, int(user_landmarks[14].y * 450) - 5)
+            
+            draw_text(webcam_resized, f"{le_angle} deg", le_pt[0], le_pt[1], 0.4, (0, 255, 255), 1)
+            draw_text(webcam_resized, f"{re_angle} deg", re_pt[0], re_pt[1], 0.4, (0, 255, 255), 1)
+
+            # Poz Sınır Kutusu Çizimi
             xs = [int(lm.x * 600) for lm in user_landmarks if lm.visibility > 0.4]
             ys = [int(lm.y * 450) for lm in user_landmarks if lm.visibility > 0.4]
             if xs and ys:
                 min_x, max_x = max(0, min(xs) - 20), min(600, max(xs) + 20)
                 min_y, max_y = max(0, min(ys) - 20), min(450, max(ys) + 20)
                 cv2.rectangle(webcam_resized, (min_x, min_y), (max_x, max_y), (0, 255, 0), 2)
-                draw_text(webcam_resized, "ISKELET KILITLENDI", min_x, max(15, min_y - 5), 0.4, (0, 255, 0), 1)
+                draw_text(webcam_resized, "DETAYLI POZ KILITI", min_x, max(15, min_y - 5), 0.4, (0, 255, 0), 1)
+
+            # HUD Poz Telemetrisi Bilgi Kutusu Çiz
+            cv2.rectangle(webcam_resized, (10, 10), (230, 115), (15, 12, 10), -1)
+            cv2.rectangle(webcam_resized, (10, 10), (230, 115), (0, 255, 0), 1)
+            
+            draw_text(webcam_resized, "DETAYLI ANALIZ TELEMETRISI", 20, 25, 0.38, (0, 255, 0), 1)
+            draw_text(webcam_resized, f"Sol Dirsek: {le_angle} deg", 20, 45, 0.35, (200, 200, 200), 1)
+            draw_text(webcam_resized, f"Sag Dirsek: {re_angle} deg", 20, 62, 0.35, (200, 200, 200), 1)
+            draw_text(webcam_resized, f"Bilek Mesafesi: {user_features['wrist_dist']:.2f}x", 20, 79, 0.35, (200, 200, 200), 1)
+            
+            sol_el_havada = "EVET" if user_features["lw_to_nose_y"] < 0 else "HAYIR"
+            sag_el_havada = "EVET" if user_features["rw_to_nose_y"] < 0 else "HAYIR"
+            draw_text(webcam_resized, f"El Durumu (L/R): {sol_el_havada} / {sag_el_havada}", 20, 96, 0.35, (200, 200, 200), 1)
 
         # Kamera karesini sol panel bölgesine koy
         canvas[120:570, 30:630] = webcam_resized
-        draw_hud_card(canvas, (30, 120), (630, 570), "CANLI POZ ANALIZI (LIVE WEBCAM)", (0, 255, 0), active=pose_detected)
+        draw_hud_card(canvas, (30, 120), (630, 570), "CANLI DETAYLI POZ ANALIZI", (0, 255, 0), active=pose_detected)
 
         # 4. Sağ Panel (Eşleşen Futbolcu) Çizimi
         gosterim_aktif = (gosterilen_player is not None) and (time.time() - son_eslesme_zamani < cooldown_zamani)
@@ -333,11 +408,11 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
             if fill_w > 0:
                 cv2.rectangle(canvas, (bar_x, bar_y), (bar_x + fill_w, bar_y + bar_h), (0, 215, 255), -1)
             
-            skor_txt = f"ESLESME: %{gosterilen_skor}"
+            skor_txt = f"ANALIZ UYUMU: %{gosterilen_skor}"
             stw = cv2.getTextSize(skor_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)[0][0]
             draw_text(canvas, skor_txt, bar_x + (bar_w - stw) // 2, bar_y + 12, 0.45, (255, 255, 255), 1)
 
-            draw_hud_card(canvas, (670, 120), (1070, 570), "ESLESEN FUTBOLCU (MATCHED PLAYER)", (0, 215, 255), active=True)
+            draw_hud_card(canvas, (670, 120), (1070, 570), "DETAYLI ESLESEN FUTBOLCU", (0, 215, 255), active=True)
         else:
             gosterilen_player = None
             canvas[130:480, 680:1060] = (25, 20, 15)
@@ -349,7 +424,7 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
             cv2.circle(canvas, (center_x, center_y), 45 - pulse // 2, (100, 90, 80), 1)
             cv2.circle(canvas, (center_x, center_y), 6, (0, 255, 0), -1)
             
-            txt1 = "POZ VERIN..."
+            txt1 = "DETAYLI POZ VERIN..."
             txt2 = "Gol sevincini taklit etmeniz bekleniyor"
             tw1 = cv2.getTextSize(txt1, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)[0][0]
             tw2 = cv2.getTextSize(txt2, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)[0][0]
@@ -357,21 +432,21 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
             draw_text(canvas, txt1, center_x - tw1 // 2, 420, 0.55, (200, 200, 200), 2)
             draw_text(canvas, txt2, center_x - tw2 // 2, 445, 0.45, (130, 130, 130), 1)
             
-            draw_hud_card(canvas, (670, 120), (1070, 570), "ESLESEN FUTBOLCU (MATCHED PLAYER)", (100, 100, 100), active=False)
+            draw_hud_card(canvas, (670, 120), (1070, 570), "DETAYLI ESLESEN FUTBOLCU", (100, 100, 100), active=False)
 
         # 5. Başlık ve Alt Şeridi Çiz
         cv2.rectangle(canvas, (0, 0), (1100, 70), (15, 12, 10), -1)
         cv2.line(canvas, (0, 70), (1100, 70), (0, 255, 0), 1)
-        draw_text(canvas, "FUTBOLCUN KIM? | WHO IS YOUR PLAYER?", 30, 45, 0.8, (0, 255, 0), 2)
+        draw_text(canvas, "DETAYLI POZ ANALIZ SISTEMI | WHO IS YOUR PLAYER", 30, 45, 0.75, (0, 255, 0), 2)
         
-        status_str = "SISTEM: AKTIF" if pose_detected else "SISTEM: BEKLEMEDE"
+        status_str = "ANALIZ: AKTIF" if pose_detected else "ANALIZ: BEKLEMEDE"
         status_color = (0, 255, 0) if pose_detected else (0, 165, 255)
         cv2.circle(canvas, (1055, 38), 6, status_color, -1)
-        draw_text(canvas, status_str, 900 if pose_detected else 890, 43, 0.45, (200, 200, 200), 1)
+        draw_text(canvas, status_str, 890 if pose_detected else 880, 43, 0.45, (200, 200, 200), 1)
 
         cv2.rectangle(canvas, (0, 600), (1100, 650), (15, 12, 10), -1)
         cv2.line(canvas, (0, 600), (1100, 600), (100, 100, 100), 1)
-        draw_text(canvas, "[Q] CIKIS (EXIT) | Kamera onunde bir gol sevinci pozu taklit ederek eslesin.", 30, 630, 0.45, (170, 170, 170), 1)
+        draw_text(canvas, "[Q] CIKIS | Dirsek acilarinizi ve el yuksekliklerinizi taklit ederek eslesin.", 30, 630, 0.45, (170, 170, 170), 1)
 
         cv2.imshow(window_name, canvas)
         

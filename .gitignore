@@ -1,0 +1,10 @@
+# Compiled python files
+__pycache__/
+*.pyc
+
+# Local IDE configuration
+.vscode/
+.idea/
+
+# Large model files (auto-downloaded by script)
+*.task
